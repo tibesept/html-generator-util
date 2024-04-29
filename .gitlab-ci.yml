@@ -1,0 +1,46 @@
+stages:
+  - build
+  - deploy
+
+build-stage:
+  stage: build
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /deploy-stage/"
+
+  image: node:18.12.1
+  before_script:
+    - node -v
+    - npm i
+  script:
+    - npm run build
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - dist
+
+deploy-stage:
+  stage: deploy
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /deploy-stage/"
+  needs:
+    - job: build-stage
+      artifacts: true
+
+  image: alpine:latest
+  environment: production
+  before_script:
+    - apk update && apk add openssh-client rsync
+    - eval $(ssh-agent -s)
+    - echo "${STAGE_KEY}" | ssh-add -
+    - mkdir -p ~/.ssh
+    - echo "Host *" >> ~/.ssh/config
+    - echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+    - echo "${STAGE_HOST}" > ~/.ssh/known_hosts
+    - cat ~/.ssh/known_hosts
+    - cat ~/.ssh/config
+
+  script:
+    - ls -ila
+    - cd ./dist
+    - rsync -atv --rsh="ssh -p ${STAGE_PORT}" --delete --progress . "${STAGE_USER}@${STAGE_HOST}:${STAGE_PATH}"
+
